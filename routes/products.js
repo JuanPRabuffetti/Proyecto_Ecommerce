@@ -1,92 +1,98 @@
 const express = require('express');
-const fs = require('fs');
+const Product = require('../models/products'); // Importar el modelo de MongoDB
 
 const router = express.Router();
 const filePath = './data/products.json';
 
-// Helper to read/write JSON
 const readFile = () => JSON.parse(fs.readFileSync(filePath, 'utf-8'));
 const writeFile = (data) => fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
 
-// GET: List all products (optionally with a limit)
-router.get('/', (req, res) => {
+router.get('/', async (req, res) => {
+    const { limit = 10, page = 1, sort, query } = req.query;
+  
+    // Filtros de búsqueda
+    const filter = query
+      ? { $or: [{ title: new RegExp(query, 'i') }, { description: new RegExp(query, 'i') }] }
+      : {};
+  
+    // Opciones de paginación y ordenamiento
+    const options = {
+      limit: parseInt(limit, 10),
+      page: parseInt(page, 10),
+      sort: sort ? { price: sort === 'asc' ? 1 : -1 } : undefined,
+    };
+  
+    try {
+      const result = await Product.paginate(filter, options);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: 'Error al obtener los productos', details: error.message });
+    }
+  });
+  
 
-    const { limit } = req.query;
-    const products = readFile();
-    res.json(limit ? products.slice(0, limit) : products);
-});
+module.exports = router;
 
-// GET: Get a product by ID
 router.get('/:pid', (req, res) => {
     const products = readFile();
-    
-    // Comparar ambos ID como números
-    const product = products.find(p => p.id === parseInt(req.params.pid));
+    const productId = parseInt(req.params.pid, 10);
+
+    const product = products.find(p => p.id === productId);
 
     if (product) {
-        return res.json(product);  // Usar return para evitar que el flujo continúe
+        res.json(product);
     } else {
-        return res.status(404).json({ error: 'Product not found' });
+        res.status(404).json({ error: 'Product not found' });
     }
 });
 
-// POST: Add a new product
-router.post('/', (req, res) => {
-    const { title, description, code, price } = req.body;
-
-    if (!title || !description || !code || !price) {
-        return res.status(400).json({ error: 'Missing required fields' });
+// POST: agregamos nuevo producto
+router.post('/', async (req, res) => {
+    const { title, description, price, category } = req.body;
+  
+    if (!title || !description || !price || !category) {
+      return res.status(400).json({ error: 'Todos los campos son obligatorios' });
     }
+  
+    try {
+      const newProduct = await Product.create({ title, description, price, category });
+      res.status(201).json(newProduct);
+    } catch (error) {
+      res.status(500).json({ error: 'Error al agregar el producto', details: error.message });
+    }
+  });
+  
 
-    const products = readFile(); // Leer productos existentes
-
-    // Generar un nuevo ID como número entero
-    const newId = products.length > 0
-        ? Math.max(...products.map(p => parseInt(p.id, 10))) + 1
-        : 1;
-
-    // Crear el nuevo producto
-    const newProduct = {
-        id: newId, // Aquí dejamos el `id` como un número
-        title,
-        description,
-        code,
-        price
-    };
-
-    products.push(newProduct); // Añadir el producto al array
-    writeFile(products); // Guardar el array actualizado
-    req.io.emit('productAdded', newProduct);
-
-
-    res.status(201).json(newProduct); // Responder con el producto creado
-});
-
-// PUT: Update a product by ID
-router.put('/:pid', (req, res) => {
+// PUT: update al producto id
+router.put('/:pid', async (req, res) => {
     const { pid } = req.params;
     const updates = req.body;
-    const products = readFile();
-
-    const productIndex = products.findIndex(p => p.id === parseInt(pid));
-
-    if (productIndex === -1) {
-        return res.status(404).json({ error: 'Product not found' });
+  
+    try {
+      const updatedProduct = await Product.findByIdAndUpdate(pid, updates, { new: true });
+      if (!updatedProduct) {
+        return res.status(404).json({ error: 'Producto no encontrado' });
+      }
+      res.json(updatedProduct);
+    } catch (error) {
+      res.status(500).json({ error: 'Error al actualizar el producto', details: error.message });
     }
+  });
 
-    const product = products[productIndex];
-    Object.assign(product, updates, { id: pid }); // Prevent ID modification
-    writeFile(products);
-    res.json(product);
-});
-
-// DELETE: Delete a product by ID
-router.delete('/:pid', (req, res) => {
+  
+  router.delete('/:pid', async (req, res) => {
     const { pid } = req.params;
-    let products = readFile();
-    products = products.filter(p => p.id !== pid);
-    writeFile(products);
-    res.status(204).send();
-});
+  
+    try {
+      const deletedProduct = await Product.findByIdAndDelete(pid);
+      if (!deletedProduct) {
+        return res.status(404).json({ error: 'Producto no encontrado' });
+      }
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ error: 'Error al eliminar el producto', details: error.message });
+    }
+  });
+  
 
 module.exports = router;

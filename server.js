@@ -6,6 +6,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const fs = require('fs');
 const filePath = path.join(__dirname, 'data', 'products.json');
+const mongoose = require('mongoose');
 
 
 // Inicialización de la app y el servidor HTTP
@@ -122,7 +123,7 @@ server.listen(8080, () => {
 });
 
 app.get('/home', (req, res) => {
-    res.render('home', { title: 'Home Page' }); // Usa tu vista `home` en Handlebars
+    res.render('home', { title: 'Home Page' });
 });
 
 app.get('/realtimeproducts', (req, res) => {
@@ -130,3 +131,12 @@ app.get('/realtimeproducts', (req, res) => {
         title: 'Productos en tiempo real',
     });
 });
+
+
+mongoose.connect('mongodb://localhost:27017/ecommerce')
+    .then(() => {
+        console.log('Connected to MongoDB');
+    })
+    .catch(err => {
+        console.error('Error connecting to MongoDB:', err.message);
+    });
