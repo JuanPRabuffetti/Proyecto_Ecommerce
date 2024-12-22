@@ -1,13 +1,25 @@
 const express = require('express');
 const router = express.Router();
-const products = require('../data/products.json'); // Asegúrate de tener la estructura.
+const Product = require('../models/products'); // Asegúrate de tener el modelo de producto
 
-router.get('/home', (req, res) => {
-    res.render('home', { title: 'Inicio', products });
+// Ruta para la página de inicio
+router.get('/home', async (req, res) => {
+    try {
+        const products = await Product.find(); // Obtener productos desde MongoDB
+        res.render('home', { title: 'Inicio', products });
+    } catch (error) {
+        res.status(500).send('Error al cargar los productos');
+    }
 });
 
-router.get('/realtimeproducts', (req, res) => {
-    res.render('realTimeProducts', { title: 'Productos en Tiempo Real', products });
+// Ruta para productos en tiempo real
+router.get('/realtimeproducts', async (req, res) => {
+    try {
+        const products = await Product.find(); // Obtener productos desde MongoDB
+        res.render('realTimeProducts', { title: 'Productos en Tiempo Real', products });
+    } catch (error) {
+        res.status(500).send('Error al cargar los productos');
+    }
 });
 
 module.exports = router;

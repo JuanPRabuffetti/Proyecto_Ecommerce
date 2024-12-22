@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const filePath = path.join(__dirname, 'data', 'products.json');
 const mongoose = require('mongoose');
+const Product = require('./models/products'); // Asegúrate de importar el modelo
 
 
 // Inicialización de la app y el servidor HTTP
@@ -18,24 +19,6 @@ app.use(express.json());
 
 // Puerto del servidor
 const PORT = 8080;
-
-const readFile = () => {
-    try {
-        return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-    } catch (error) {
-        console.error('Error leyendo el archivo:', error);
-        return [];
-    }
-};
-
-const writeFile = (data) => {
-    try {
-        fs.writeFileSync(filePath, JSON.stringify(data, null, 2));
-        console.log('Archivo guardado correctamente');
-    } catch (error) {
-        console.error('Error escribiendo el archivo:', error);
-    }
-};
 
 
 // Configuración de Handlebars
@@ -75,41 +58,54 @@ app.get('/home', (req, res) => {
     });
 });
 
-io.on('connection', (socket) => {
+io.on('connection', async (socket) => {
     console.log('Cliente conectado');
 
-    // Emitir productos al cliente cuando se conecta
-    const products = readFile();
-    socket.emit('updateProducts', products);
+    try {
+        // Obtener productos desde MongoDB y emitirlos al cliente
+        const products = await Product.find();
+        socket.emit('updateProducts', products);
+    } catch (error) {
+        console.error('Error al obtener los productos:', error);
+    }
 
     // Manejar la creación de un producto
-    socket.on('addProduct', (product) => {
-        if (!product.title || !product.description || !product.price) {
-            console.error("Producto inválido, falta información importante");
-            return;
+    socket.on('addProduct', async (product) => {
+        try {
+            if (!product.title || !product.description || !product.price) {
+                console.error("Producto inválido, falta información importante");
+                return;
+            }
+
+            // Crear un nuevo producto en MongoDB
+            const newProduct = new Product({
+                ...product,
+                stock: product.stock || 0, // Valor por defecto para el stock
+            });
+                await newProduct.save();
+
+            // Obtener productos actualizados desde MongoDB
+            const products = await Product.find();
+            io.emit('updateProducts', products); // Emitir los productos actualizados
+        } catch (error) {
+            console.error('Error al agregar el producto:', error);
         }
-
-        const products = readFile();
-        const newId = products.length > 0 ? Math.max(...products.map(p => p.id)) + 1 : 1;
-        const newProduct = { id: newId, ...product };
-
-        products.push(newProduct);
-        writeFile(products);
-
-        io.emit('updateProducts', products); // Emitir los productos actualizados
     });
 
     // Manejar la eliminación de un producto
-    socket.on('deleteProduct', (productId) => {
-        console.log(`Eliminando producto con ID: ${productId}`);
+    socket.on('deleteProduct', async (productId) => {
+        try {
+            console.log(`Eliminando producto con ID: ${productId}`);
 
-        const products = readFile();
-        const productIdNum = parseInt(productId, 10);
-        const updatedProducts = products.filter(product => product.id !== productIdNum);
+            // Eliminar el producto de MongoDB
+            await Product.findByIdAndDelete(productId);
 
-        writeFile(updatedProducts);
-
-        io.emit('updateProducts', updatedProducts); // Emitir los productos actualizados
+            // Obtener productos actualizados desde MongoDB
+            const products = await Product.find();
+            io.emit('updateProducts', products); // Emitir los productos actualizados
+        } catch (error) {
+            console.error('Error al eliminar el producto:', error);
+        }
     });
 
     socket.on('disconnect', () => {
@@ -117,19 +113,75 @@ io.on('connection', (socket) => {
     });
 });
 
+
+
+
 // Cambia el `app.listen` a `server.listen`
 server.listen(8080, () => {
     console.log('Server is running on http://localhost:8080');
 });
 
-app.get('/home', (req, res) => {
-    res.render('home', { title: 'Home Page' });
+
+app.get('/home', async (req, res) => {
+    const { limit = 10, page = 1, sort, query } = req.query;
+
+    // Filtro de búsqueda
+    const filter = query
+        ? { $or: [{ title: new RegExp(query, 'i') }, { description: new RegExp(query, 'i') }] }
+        : {};
+
+    // Opciones de paginación
+    const options = {
+        limit: parseInt(limit, 10),
+        page: parseInt(page, 10),
+        sort: sort ? { price: sort === 'asc' ? 1 : -1 } : undefined,
+    };
+
+    try {
+        const result = await Product.paginate(filter, options);
+        res.render('home', {
+            title: 'Lista de productos',
+            products: result.docs, // Productos paginados
+            totalPages: result.totalPages,
+            currentPage: result.page,
+            hasNextPage: result.hasNextPage,
+            hasPrevPage: result.hasPrevPage,
+            nextPage: result.nextPage,
+            prevPage: result.prevPage,
+            limit: options.limit,
+        });
+    } catch (error) {
+        console.error('Error al obtener productos paginados:', error);
+        res.status(500).send('Error al obtener productos paginados');
+    }
 });
 
-app.get('/realtimeproducts', (req, res) => {
-    res.render('realtimeproducts', {
-        title: 'Productos en tiempo real',
+
+app.get('/realtimeproducts', async (req, res) => {
+    try {
+        const products = await Product.find(); // Obtener los productos desde MongoDB
+        res.render('realtimeproducts', {
+            title: 'Productos en tiempo real',
+            products, // Pasamos los productos a la vista
+        });
+    } catch (error) {
+        console.error('Error al cargar los productos:', error);
+        res.status(500).send('Error al cargar los productos');
+    }
+});
+
+app.use('/products', productsRouter); // Esto asegura que '/products' esté asociado con las rutas definidas en productsRouter
+
+mongoose.connect('mongodb://localhost:27017/ecommerce')
+    .then(() => {
+        console.log('Connected to MongoDB');
+    })
+    .catch(err => {
+        console.error('Error connecting to MongoDB:', err.message);
     });
+
+app.listen(PORT, () => {
+    console.log(`Server is running on http://localhost:${PORT}`);
 });
 
 
